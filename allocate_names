@@ -1,0 +1,217 @@
+Option Explicit
+'number of all items in the document
+Dim total As Integer
+'average number of items per person
+Dim itemsPerPerson As Integer
+'number of avg items minus rolled forward
+Dim ItemsToDo As Byte
+Dim check As Integer
+Dim availableMuppets As Byte
+Dim pt As PivotTable
+Dim numOfRows As Integer
+
+Sub AP_allocateNames()
+
+    'load global variables
+    Call var
+    
+    'declare object
+    Dim objMuppet As Object
+    
+    'declare dictionary
+    Dim dirMuppet As Dictionary
+    
+    'initialize our new dictionary
+    Set dirMuppet = New Dictionary
+    
+    'declare temporary variable
+    Dim temp As String
+    
+    'item id var (for dictionary)
+    Dim i As String
+    
+    'open new allocation
+    'On Error GoTo getPath
+    Workbooks.Open Filename:=newAlo
+    'On Error GoTo 0
+    
+    'select second column items
+    With ActiveWorkbook.Sheets("Allocation")
+        .Select
+        .Range("B2", Range("B2").End(xlDown)).Select
+    End With
+    
+    'total number of items to be allocated
+    total = Selection.rows.Count
+    
+    With ActiveWorkbook.Sheets("Allocation")
+        .Select
+        .Range("C2", Range("C2").End(xlDown)).Select
+    End With
+    
+    check = Selection.rows.Count
+    
+    'check if we have correct amount of items (in case there are some empty cells in column B
+    If total <> check Then
+    MsgBox "there are some empty cells in column B or C, please check and run macro again'"
+    Exit Sub
+    End If
+    
+    'get number of employees
+    Workbooks(macroName).Activate
+    Sheets(1).Cells(28, 4).Select
+    
+    Dim counter As Integer
+    counter = 0
+    
+    Do Until ActiveCell.Value = ""
+        'check if person's workload is not zero, and add to count if not
+        If ActiveCell.Offset(0, 2) <> 0 Then
+            counter = counter + 1
+        End If
+        ActiveCell.Offset(1, 0).Select
+    Loop
+    
+    If counter = 0 Then
+        MsgBox "please verify names and allocation values in main file"
+        Exit Sub
+    End If
+    
+    'divide total by available employees
+    itemsPerPerson = Application.WorksheetFunction.RoundDown(total / counter, 0)
+    
+    'set up pivot location (for rolled forward items)
+    Set pt = Workbooks(newName).Sheets("Pivot").PivotTables(1)
+    
+    ThisWorkbook.Sheets(1).Cells(28, 4).Select
+    
+    'loop through the names
+    Do Until ActiveCell.Value = ""
+        i = "k" & ActiveCell.Value
+        
+        'initialize object every time! (after setting it to nothing as well)
+        Set objMuppet = New employee
+        
+        objMuppet.Name = ActiveCell.Value
+        objMuppet.Percentage = ActiveCell.Offset(0, 2).Value
+        objMuppet.NotTrainedIn = ActiveCell.Offset(0, 4).Value
+        On Error GoTo errH
+        objMuppet.ItemsRolled = pt.GetPivotData("WCI Document ID", "NAME", objMuppet.Name).Value
+        On Error GoTo 0
+        
+        If (objMuppet.Percentage <> 0) Then
+            
+            objMuppet.ItemsToDo = itemsPerPerson - objMuppet.ItemsRolled
+            
+        Else
+            objMuppet.ItemsToDo = 0
+        End If
+        
+        'if there is any workload allocated for given person, they will get added to dictionary
+        If (objMuppet.Percentage <> 0) Then
+            dirMuppet.Add i, objMuppet
+        End If
+        
+        Set objMuppet = Nothing
+        ActiveCell.Offset(1, 0).Select
+        
+        
+    Loop
+    
+    'END OF OBJECT PROPERTIES CREATION -------------------------------
+    
+    '-------------------------ALLOCATION OF OBJECT NAMES -------------
+    
+    'FILTER ROWS BY OPERATING UNITS
+    Application.ScreenUpdating = False
+    
+    Workbooks(newName).Activate
+    
+    
+    
+    With ActiveSheet
+        
+        .Cells.AutoFilter Field:=8, Criteria1:="#N/A"
+        
+        .Cells.AutoFilter Field:=1, _
+        Criteria1:=Array(indiaOU), Operator:=xlFilterValues
+        
+    
+    End With
+    
+   'LOOP THROUGH VISIBLE ROWS (COLUMN H)
+    
+    Dim rnVisible As Range, rnCell As Range
+     
+    Application.ScreenUpdating = False
+     
+    Dim y As Integer
+     
+    'counter
+    y = 0
+          
+    With ActiveSheet
+         
+        Set rnVisible = .Range(.Range("H2"), .Range("H65536").End(xlUp))
+         
+        rnVisible.SpecialCells(xlCellTypeVisible).Offset(0, 3).Value = "Has it worked"
+         
+         'Iterate through the visible cells in the H-column and show their addresses.
+        For Each rnCell In rnVisible.SpecialCells(xlCellTypeVisible)
+             
+nextPerson:
+             'if our counter goes over number of employees, reset it
+             If (y > dirMuppet.Count - 1) Then
+                y = 0
+             End If
+             
+             If (dirMuppet.Items(y).NotTrainedIn = "ind") Then
+                y = y + 1
+                GoTo nextPerson
+                
+             End If
+             
+             rnCell.Value = dirMuppet.Items(y).Name
+             
+             dirMuppet.Items(y).ItemsToDo = dirMuppet.Items(y).ItemsToDo - 1
+
+             y = y + 1
+        Next
+        
+    End With
+    
+    
+   
+    
+    
+    
+    'todo: figure out hot to filter the international ou's,
+    ' then figure out how to loop thorugh filtering and loop through fitered selection
+    '(special selection) and apply names and reduce item allocation per specific object
+    '(EAASY)
+    
+    Application.ScreenUpdating = True
+    
+    
+   '***** ERROR HANDLER ******
+    Exit Sub
+errH:
+    objMuppet.ItemsRolled = 0
+    Resume Next
+    
+End Sub
+
+
+Function GetFilteredRangeBottomRow() As Long
+  Dim HeaderRow As Long, LastFilterRow As Long, Addresses() As String
+  On Error GoTo NoFilterOnSheet
+  With ActiveSheet
+    HeaderRow = .AutoFilter.Range(1).Row
+    LastFilterRow = .Range(Split(.AutoFilter.Range.Address, ":")(1)).Row
+    Addresses = Split(.Range((HeaderRow + 1) & ":" & LastFilterRow). _
+                      SpecialCells(xlCellTypeVisible).Address, "$")
+    GetFilteredRangeBottomRow = Addresses(UBound(Addresses))
+  End With
+NoFilterOnSheet:
+End Function
+
