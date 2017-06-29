@@ -4,7 +4,7 @@ Dim total As Integer
 'average number of items per person
 Dim itemsPerPerson As Integer
 'number of avg items minus rolled forward
-Dim ItemsToDo As Byte
+Dim ItemsToDo As Integer
 Dim check As Integer
 Dim availableMuppets As Byte
 Dim pt As PivotTable
@@ -78,8 +78,8 @@ Sub AP_allocateNames()
     End If
     
     'divide total by available employees
-    itemsPerPerson = Application.WorksheetFunction.RoundDown(total / counter, 0)
-    
+    itemsPerPerson = Application.WorksheetFunction.RoundUp(total / counter, 0)
+    MsgBox itemsPerPerson
     'set up pivot location (for rolled forward items)
     Set pt = Workbooks(newName).Sheets("Pivot").PivotTables(1)
     
@@ -100,9 +100,9 @@ Sub AP_allocateNames()
         On Error GoTo 0
         
         If (objMuppet.Percentage <> 0) Then
-            
+            On Error GoTo setToZero
             objMuppet.ItemsToDo = itemsPerPerson - objMuppet.ItemsRolled
-            
+            On Error GoTo 0
         Else
             objMuppet.ItemsToDo = 0
         End If
@@ -128,17 +128,6 @@ Sub AP_allocateNames()
     Workbooks(newName).Activate
     
     
-    
-    With ActiveSheet
-        
-        .Cells.AutoFilter Field:=8, Criteria1:="#N/A"
-        
-        .Cells.AutoFilter Field:=1, _
-        Criteria1:=Array(indiaOU), Operator:=xlFilterValues
-        
-    
-    End With
-    
    'LOOP THROUGH VISIBLE ROWS (COLUMN H)
     
     Dim rnVisible As Range, rnCell As Range
@@ -149,46 +138,69 @@ Sub AP_allocateNames()
      
     'counter
     y = 0
-          
+    
+    
+    'get a way to loop through the array and insert all values in the filter
+    'use allOU variable to loop through all ou's and set exceptions
+    '
+    MsgBox dirMuppet.Items(0).ItemsToDo
+    MsgBox dirMuppet.Items(1).ItemsToDo
+    
     With ActiveSheet
-         
+        
+        Dim oU As Variant
+        Dim filteredRows As Integer
+        
+            
+        For Each oU In allOU
+        
+        .Cells.AutoFilter Field:=8, Criteria1:="#N/A"
+        
+        .Cells.AutoFilter Field:=1, _
+        Criteria1:=Array(oU), Operator:=xlFilterValues
+        
         Set rnVisible = .Range(.Range("H2"), .Range("H65536").End(xlUp))
-         
-        rnVisible.SpecialCells(xlCellTypeVisible).Offset(0, 3).Value = "Has it worked"
-         
-         'Iterate through the visible cells in the H-column and show their addresses.
-        For Each rnCell In rnVisible.SpecialCells(xlCellTypeVisible)
-             
-nextPerson:
-             'if our counter goes over number of employees, reset it
-             If (y > dirMuppet.Count - 1) Then
-                y = 0
-             End If
-             
-             If (dirMuppet.Items(y).NotTrainedIn = "ind") Then
-                y = y + 1
-                GoTo nextPerson
                 
-             End If
-             
-             rnCell.Value = dirMuppet.Items(y).Name
-             
-             dirMuppet.Items(y).ItemsToDo = dirMuppet.Items(y).ItemsToDo - 1
-
-             y = y + 1
+                'Iterate through the visible cells in the H-column and show their addresses.
+                For Each rnCell In rnVisible.SpecialCells(xlCellTypeVisible)
+                    
+nextPerson:
+                    'if row was already allocated (rolled forward allocation) then go the the next line
+                    If (Not IsError(rnCell.Value)) Then
+                        GoTo skipLine
+                    End If
+                     'if our counter goes over number of employees, reset it
+                     If (y > dirMuppet.Count - 1) Then
+                        y = 0
+                     End If
+                     
+                     'If (dirMuppet.Items(y).ItemsToDo = 0) Then
+                     '   y = y + 1
+                     '   GoTo nextPerson
+                     'End If
+                     'If (dirMuppet.Items(y).NotTrainedIn = "ind") Then
+                     '   y = y + 1
+                     '   GoTo nextPerson
+                        
+                     'End If
+                     
+                     'if person's allocated number is not zero, allocate next item
+                     If (dirMuppet.Items(y).ItemsToDo > 0) Then
+                        rnCell.Value = dirMuppet.Items(y).Name
+                        dirMuppet.Items(y).ItemsToDo = dirMuppet.Items(y).ItemsToDo - 1
+                     Else
+                        y = y + 1
+                        GoTo nextPerson
+                     'if person reached limit of their allocation, increment counter and start over
+                     End If
+                     
+                     y = y + 1
+skipLine:
+                Next
+                
         Next
         
     End With
-    
-    
-   
-    
-    
-    
-    'todo: figure out hot to filter the international ou's,
-    ' then figure out how to loop thorugh filtering and loop through fitered selection
-    '(special selection) and apply names and reduce item allocation per specific object
-    '(EAASY)
     
     Application.ScreenUpdating = True
     
@@ -198,7 +210,9 @@ nextPerson:
 errH:
     objMuppet.ItemsRolled = 0
     Resume Next
-    
+setToZero:
+    objMuppet.ItemsToDo = 0
+    Resume Next
 End Sub
 
 
