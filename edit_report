@@ -1,0 +1,244 @@
+
+
+Sub AP_editNewReport()
+
+'Variables to refer to Excel and Objects
+Dim MySheetPath As String
+Dim Xl As Excel.Application
+Dim XlBook As Excel.Workbook
+Dim XlSheet As Excel.Worksheet
+
+
+Call variables
+
+'message for user to select a file with today's queue
+MsgBox "Select today's queue file"
+ 
+' Select work file
+Dim fNameAndPath As Variant
+fNameAndPath = Application.GetOpenFilename(FileFilter:="Excel Files (*.XLSx), *.XLSx", Title:="Select File To Be Opened")
+If fNameAndPath = False Then Exit Sub
+Workbooks.Open Filename:=fNameAndPath
+ 
+' Tell it location of actual Excel file
+MySheetPath = fNameAndPath
+
+'Open Excel and the workbook
+Set Xl = CreateObject("Excel.Application")
+Set XlBook = GetObject(MySheetPath)
+ 
+'Make sure excel is visible on the screen
+Xl.Visible = True
+XlBook.Windows(1).Visible = True
+ 
+'Define the sheet in the Workbook as XlSheet
+Set XlSheet = XlBook.Worksheets(1)
+ 
+'Insert Row and the Value in the excel sheet starting at specified cell
+XlSheet.rows(2).EntireRow.Insert
+
+Application.ScreenUpdating = False
+
+'delete unnecessary rows and columns
+
+rows("7").EntireRow.Delete
+rows("1:5").EntireRow.Delete
+Sheets("Sheet1").Range("H:T", "J:P").EntireColumn.Delete
+Sheets("Sheet1").Range("J:P").EntireColumn.Delete
+XlSheet.Range("H:I").EntireColumn.Insert
+Sheets("Sheet1").Range("E:E").EntireColumn.Delete
+
+
+ 
+ XlSheet.Range("G2:G5000").NumberFormat = "0"
+ XlSheet.Range("G1") = "AGE"
+ XlSheet.Range("H1") = "NAME"
+ 
+ 
+ 
+'delete non ap spec docs
+ Dim FirstRow As Long
+    Dim LastRow As Long
+    Dim Lrow As Long
+    Dim CalcMode As Long
+    Dim ViewMode As Long
+
+    With Application
+        CalcMode = .Calculation
+        .Calculation = xlCalculationManual
+        
+    End With
+
+    'We use the ActiveSheet but you can replace this with
+    'Sheets("MySheet")if you want
+    With ActiveSheet
+
+        'We select the sheet so we can change the window view
+        .Select
+
+        'If you are in Page Break Preview Or Page Layout view go
+        'back to normal view, we do this for speed
+        ViewMode = ActiveWindow.View
+        ActiveWindow.View = xlNormalView
+
+        'Turn off Page Breaks, we do this for speed
+        .DisplayPageBreaks = False
+
+        'Set the first and last row to loop through
+        'Skip first row (header)
+        FirstRow = .UsedRange.Offset(1, 0).Row
+        LastRow = .UsedRange.rows(.UsedRange.rows.Count).Row
+
+        'We loop from Lastrow to Firstrow (bottom to top)
+        For Lrow = LastRow To FirstRow Step -1
+
+            'We check the values in the A column in this example
+            With .Cells(Lrow, "B")
+
+                If Not IsError(.Value) Then
+
+                    If .Value <> "AP_Spec Queue" Then .EntireRow.Delete
+                    
+                End If
+                    
+            End With
+            With .Cells(Lrow, "C")
+
+                If Not IsError(.Value) Then
+
+                    If .Value = "Payment Request" Then .EntireRow.Delete
+                    
+                End If
+                    
+            End With
+            
+        Next Lrow
+
+    End With
+
+    ActiveWindow.View = ViewMode
+    With Application
+        
+        .Calculation = CalcMode
+    End With
+'end of deletion
+
+
+'Finds how many rows are used (have values)
+'We use it to define range when calculating age of items
+
+ 
+ With Sheets("Sheet1")
+    If Application.WorksheetFunction.CountA(.Cells) <> 0 Then
+        LastRow = .Cells.Find(What:="*", _
+                      After:=.Range("A1"), _
+                      Lookat:=xlPart, _
+                      LookIn:=xlFormulas, _
+                      SearchOrder:=xlByRows, _
+                      SearchDirection:=xlPrevious, _
+                      MatchCase:=False).Row
+    Else
+        lastCol = 1
+    End If
+End With
+
+ 
+'calculate age of document
+ 
+ Dim rngData As Range
+ Dim rngCell As Range
+ 
+ 'range from second row till the last row with data(column F, because we will offset by one to the right)
+ Set rngData = Sheets("Sheet1").Range(Cells(2, 6), Cells(LastRow, 6))
+ 
+ 
+ For Each rngCell In rngData
+    rngCell.Offset(0, 1) = WorksheetFunction.Round(Now() - rngCell.Value, 0)
+    
+    Next
+ 'end of age calculation#
+
+ 'remove items below specified age
+ 
+ With ActiveSheet
+
+        'We select the sheet so we can change the window view
+        .Select
+
+        'If you are in Page Break Preview Or Page Layout view go
+        'back to normal view, we do this for speed
+        ViewMode = ActiveWindow.View
+        ActiveWindow.View = xlNormalView
+
+        'Turn off Page Breaks, we do this for speed
+        .DisplayPageBreaks = False
+
+        'Set the first and last row to loop through
+        'Skip first row (header)
+        FirstRow = .UsedRange.Offset(1, 0).Row
+        LastRow = .UsedRange.rows(.UsedRange.rows.Count).Row
+
+        'We loop from Lastrow to Firstrow (bottom to top)
+        For Lrow = LastRow To FirstRow Step -1
+
+            'We check the values in the A column in this example
+            With .Cells(Lrow, "G")
+
+                If Not IsError(.Value) Then
+
+                    If .Value < minDocumentAge Then .EntireRow.Delete
+                    
+                End If
+
+            End With
+            
+        Next Lrow
+
+    End With
+    
+    
+Application.ScreenUpdating = True
+ 'end of deletion items with age =0
+
+'copy contents within new workbook
+Sheets("Sheet1").Copy
+
+'name the created sheet
+ActiveSheet.name = "Allocation"
+
+'Do not diplay prompt 'do you want to save'
+Application.DisplayAlerts = False
+
+'Close 'allocation' file (from which we generated report)
+Workbooks("allocation.xlsx").Close
+
+'Turn prompts back on
+Application.DisplayAlerts = True
+
+Dim strFileName As Variant
+
+'Create Save prompt new workbook with a current date
+ strFileName = Application.GetSaveAsFilename(Format(Date, "dd_mm_yyyy") & ".xlsx")
+    If strFileName = "False" Then Exit Sub 'User Canceled
+    ActiveWorkbook.SaveAs Filename:=strFileName
+ 
+'Close new workbook that we just created/saved
+ActiveWorkbook.Close
+
+Cells(10, 4) = strFileName
+
+'Clean up and end with worksheet visible on the screen
+Set Xl = Nothing
+Set XlBook = Nothing
+Set XlSheet = Nothing
+
+
+
+End Sub
+
+
+
+
+
+
+
