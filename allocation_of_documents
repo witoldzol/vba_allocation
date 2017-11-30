@@ -1,0 +1,421 @@
+Option Explicit
+'number of all items in the document
+Dim total As Integer
+'average number of items per person
+Dim itemsPerPerson As Integer
+'number of avg items minus rolled forward
+Dim ItemsToDo As Integer
+Dim check As Integer
+Dim availableMuppets As Byte
+Dim pt As PivotTable
+Dim numOfRows As Integer
+Dim weight As Double
+Dim allocated As Integer
+
+
+Sub AP_allocateNames()
+
+    'load global variables
+    Call variables
+    
+    'declare object
+    Dim objMuppet As Object
+    
+    'declare dictionary
+    Dim dirMuppet As Dictionary
+    
+    'initialize our new dictionary
+    Set dirMuppet = New Dictionary
+    
+    'declare temporary variable
+    Dim temp As String
+    
+    'item id var (for dictionary)
+    Dim i As String
+    
+    'open new allocation
+    'On Error GoTo getPath
+    Workbooks.Open Filename:=newAlo
+    'On Error GoTo 0
+    
+    'select second column items
+    With ActiveWorkbook.Sheets("Allocation")
+        .Select
+        .Range("B2", Range("B2").End(xlDown)).Select
+    End With
+    
+    'total number of items to be allocated
+    total = Selection.rows.Count
+    
+    With ActiveWorkbook.Sheets("Allocation")
+        .Select
+        .Range("C2", Range("C2").End(xlDown)).Select
+    End With
+    
+    check = Selection.rows.Count
+    
+    'check if we have correct amount of items (in case there are some empty cells in column B
+    If total <> check Then
+    MsgBox "there are some empty cells in column B or C, please check and run macro again'"
+    Exit Sub
+    End If
+    
+    
+    
+    'get number of employees
+    Workbooks(macroName).Activate
+    Sheets(1).Cells(28, 4).Select
+    
+    Dim counter As Integer
+    counter = 0
+    
+    'set ititial weight (we will use it to calc avg number of items per person)
+    weight = 0
+    
+    
+    Do Until ActiveCell.Value = ""
+        'check if person's workload is not zero, and add to count if not
+        If ActiveCell.Offset(0, 2) <> 0 Then
+            
+            counter = counter + 1
+            
+            weight = weight + ActiveCell.Offset(0, 2).Value
+            
+        End If
+        ActiveCell.Offset(1, 0).Select
+    Loop
+    
+    If counter = 0 Then
+        MsgBox "please verify names and allocation values in main file"
+        Exit Sub
+    End If
+    
+    'divide total by available employees
+    'we round down , we will allocate odd reminder to the person with lowest %
+    itemsPerPerson = Application.WorksheetFunction.RoundDown(total / weight, 0)
+    
+    'this will be our counter that keeps track of items allocated so far
+    allocated = 0
+    
+    'set up pivot location (for rolled forward items)
+    Set pt = Workbooks(newName).Sheets("Pivot").PivotTables(1)
+    
+    ThisWorkbook.Sheets(1).Cells(28, 4).Select
+    
+    'loop through the names
+    Do Until ActiveCell.Value = ""
+        i = "k" & ActiveCell.Value
+        
+        'initialize object every time! (after setting it to nothing as well)
+        Set objMuppet = New employee
+        objMuppet.name = ActiveCell.Value
+        objMuppet.Percentage = ActiveCell.Offset(0, 2).Value
+        objMuppet.NotTrainedIn = ActiveCell.Offset(0, 4).Value
+        On Error GoTo errH
+        objMuppet.ItemsRolled = pt.GetPivotData("WCI Document ID", "NAME", objMuppet.name).Value
+        On Error GoTo 0
+        
+        If (objMuppet.Percentage <> 0) Then
+            On Error GoTo setToZero
+            allocated = allocated + (itemsPerPerson * objMuppet.Percentage)
+            objMuppet.ItemsToDo = (itemsPerPerson * objMuppet.Percentage) - objMuppet.ItemsRolled
+            On Error GoTo 0
+            
+        Else
+            objMuppet.ItemsToDo = 0
+        End If
+        
+        'set item per person CAP
+        If (objMuppet.ItemsToDo > maxItemPerPerson) Then
+        
+            objMuppet.ItemsToDo = maxItemPerPerson
+            
+        End If
+        
+        
+        'if there is any workload allocated for given person, they will get added to dictionary
+        If (objMuppet.Percentage <> 0) Then
+            dirMuppet.Add i, objMuppet
+        End If
+        
+        Set objMuppet = Nothing
+        ActiveCell.Offset(1, 0).Select
+        
+        
+    Loop
+    
+    Dim v As Integer
+    v = 0
+    
+    'redistribute remaining items (total - allocated)
+checkIfItemsLeft:
+    
+    If (total >= allocated) Then
+    
+        'reset counter if we exceed nb of available people
+        If (v > dirMuppet.Count - 1) Then
+            v = 0
+        End If
+        
+        'allocate one item at teh time from the top
+        dirMuppet.Items(v).ItemsToDo = dirMuppet.Items(v).ItemsToDo + 1
+        'increment counter
+        v = v + 1
+        'increment allocated items
+        allocated = allocated + 1
+        'run again
+        GoTo checkIfItemsLeft
+        
+    End If
+    
+    
+    'END OF OBJECT PROPERTIES CREATION -------------------------------
+    
+    
+    
+    '-------------------------ALLOCATION OF OBJECT NAMES -------------
+    
+    'FILTER ROWS BY OPERATING UNITS
+    Application.ScreenUpdating = False
+    
+    Workbooks(newName).Activate
+    
+   'LOOP THROUGH VISIBLE ROWS (COLUMN H)
+    
+    Dim rnVisible As Range, rnCell As Range
+     
+    Application.ScreenUpdating = False
+     
+    Dim y As Integer
+    Dim x As Integer
+    Dim z As Integer
+    
+    'counter
+    y = 0
+    'yet another counter (used for tracking redistributed items)
+    z = 0
+    'switch that we will use to mark which OU we are currently looping through
+    x = 0
+    
+
+    
+    With ActiveSheet
+        
+        Dim oU As Variant
+        Dim filteredRows As Integer
+        
+        'LOOP THROUGH OPERATIONG UNITS
+        For Each oU In allOU
+        
+        'change switch on every run (we start if 0)
+        x = x + 1
+        
+        .Cells.AutoFilter Field:=1, _
+        Criteria1:=Array(oU), Operator:=xlFilterValues
+        
+        Set rnVisible = .Range(.Range("H2"), .Range("H6553").End(xlUp))
+                
+                'Iterate through the visible cells in the H-column and show their addresses.
+                For Each rnCell In rnVisible.SpecialCells(xlCellTypeVisible)
+                
+                'If (dirMuppet.finished.Exists("no")) Then Exit For
+                    
+nextPerson:
+                     'if row was already allocated (rolled forward allocation) then go the the next line
+                     If (Not IsError(rnCell.Value)) Then
+                     
+                        If (dirMuppet.Exists("k" & rnCell.Value)) Then
+                            
+                            GoTo skipLine
+                        'Else
+                                'if we find items that belongs to person that is not in current allocation
+                                'it needs to be redistributed, so we increase items to do by one for current person
+                                'we use counter to avoid giving to many items to people who have least amount of exceptions
+                            'dirMuppet.Items(z).ItemsToDo = dirMuppet.Items(z).ItemsToDo + 1
+                            'z = z + 1
+                                'reset counter if we exceed number of available folks
+                            'If (z > dirMuppet.Count - 1) Then
+                            
+                            '    z = 0
+                                
+                            'End If
+                            
+                        End If
+                        
+                     End If
+                    
+                     'if our counter goes over number of employees, reset it
+                     If (y > dirMuppet.Count - 1) Then
+                        y = 0
+                     End If
+                     
+                     'OPERATING UNIT SWITCH
+                     'first 3 OU's can be exceptions, so first three iterations we will check
+                     'if people are trained in given items
+                     
+                     'test
+                     'If (x < 4) Then
+                            
+                      '      If InStr(dirMuppet.Items(y).NotTrainedIn, x) > 0 Then
+                       '        y = y + 1
+                        '       GoTo nextPerson
+                         '   End If
+                        
+                     'End If
+                     
+                     'if person's allocated number is not zero, allocate next item
+                     On Error Resume Next
+                     If (dirMuppet.Items(y).ItemsToDo > 0) Then
+                     'On Error GoTo 0
+                        rnCell.Value = dirMuppet.Items(y).name
+                        dirMuppet.Items(y).ItemsToDo = dirMuppet.Items(y).ItemsToDo - 1
+                        
+                     'if person reached limit of their allocation, increment counter and start over
+                     Else
+                        'y = y + 1
+                        dirMuppet.Remove ("k" & dirMuppet.Items(y).name)
+                        GoTo nextPerson
+                     
+                     End If
+                     
+                     y = y + 1
+skipLine:
+                Next
+                
+        Next
+        .AutoFilterMode = False
+        
+        .Range("H1").Value = "NAME"
+        
+        
+    End With
+    
+    '------------------------------ENTER PIVOT----------------------------
+     On Error Resume Next
+     
+    'sheet for pivot table
+    Dim PSheet As Worksheet
+    'our data sheet
+    Dim DSheet As Worksheet
+    'pivot cache
+    Dim PCache As PivotCache
+    'data table cache
+    Dim DCache As PivotCache
+        
+    Dim PRange As Range
+    
+    Set PRange = Sheets("Allocation").Range("A1").CurrentRegion
+    
+    Sheets("Pivot").Activate
+    
+    Set PSheet = Worksheets("Pivot")
+    Set DSheet = Worksheets("Allocation")
+    
+    
+    ActiveSheet.Range("B17").Value = "NEW ALLOCATION"
+    Range("B17", "F17").Interior.ColorIndex = 41
+    
+    Set PCache = ActiveWorkbook.PivotCaches.Create _
+    (SourceType:=xlDatabase, SourceData:=PRange). _
+    CreatePivotTable(TableDestination:=PSheet.Cells(18, 2), _
+    TableName:="New_Allocation")
+    
+    'insert ROW
+    With ActiveSheet.PivotTables("New_Allocation").PivotFields("AGE")
+    .Orientation = xlRowField
+    .Position = 1
+    End With
+    
+    'insert COLUMN
+    With ActiveSheet.PivotTables("New_Allocation").PivotFields("NAME")
+    .Orientation = xlColumnField
+    .Position = 1
+    End With
+    
+    'insesrt DATA
+    With ActiveSheet.PivotTables("New_Allocation").PivotFields("WCI Document ID")
+    .Orientation = xlDataField
+    .Position = 1
+    .Function = xlCount
+    '.NumberFormat = "#,##0"
+    .name = "Invoices"
+    End With
+    
+    
+    '------------second pivot (by OU's) --------------
+    
+    ActiveSheet.Range("B29").Value = "TOTAL ALLOCATION BY OU"
+    Range("B29", "F29").Interior.ColorIndex = 41
+    
+    
+    Set PCache = ActiveWorkbook.PivotCaches.Create _
+    (SourceType:=xlDatabase, SourceData:=PRange). _
+    CreatePivotTable(TableDestination:=PSheet.Cells(30, 2), _
+    TableName:="New_Allocation_ou")
+    
+    'insert ROW
+    With ActiveSheet.PivotTables("New_Allocation_ou").PivotFields("OPERATING_UNIT")
+    .Orientation = xlRowField
+    .Position = 1
+    End With
+    
+    'insert COLUMN
+    With ActiveSheet.PivotTables("New_Allocation_ou").PivotFields("NAME")
+    .Orientation = xlColumnField
+    .Position = 1
+    End With
+    
+    'insesrt DATA
+    With ActiveSheet.PivotTables("New_Allocation_ou").PivotFields("WCI Document ID")
+    .Orientation = xlDataField
+    .Position = 1
+    .Function = xlCount
+    '.NumberFormat = "#,##0"
+    .name = "Invoices"
+    End With
+    
+    '--------------- END OF PIVOTS----------------
+    
+    Application.ScreenUpdating = True
+    
+   '***** ERROR HANDLER ******
+    Exit Sub
+errH:
+    objMuppet.ItemsRolled = 0
+    Resume Next
+setToZero:
+    objMuppet.ItemsToDo = 0
+    Resume Next
+End Sub
+
+
+
+Function GetFilteredRangeBottomRow() As Long
+  Dim HeaderRow As Long, LastFilterRow As Long, Addresses() As String
+  On Error GoTo NoFilterOnSheet
+  With ActiveSheet
+    HeaderRow = .AutoFilter.Range(1).Row
+    LastFilterRow = .Range(Split(.AutoFilter.Range.Address, ":")(1)).Row
+    Addresses = Split(.Range((HeaderRow + 1) & ":" & LastFilterRow). _
+                      SpecialCells(xlCellTypeVisible).Address, "$")
+    GetFilteredRangeBottomRow = Addresses(UBound(Addresses))
+  End With
+NoFilterOnSheet:
+End Function
+
+
+
+
+Function regex_tester(key As Integer, strToSearch As String) As Boolean
+Dim objRegExp_1 As Object
+Dim regExp_Matches As Object
+Set objRegExp_1 = CreateObject("vbscript.regexp")
+objRegExp_1.Global = True
+objRegExp_1.IgnoreCase = True
+objRegExp_1.Pattern = [key]
+Set regExp_Matches = objRegExp_1.Execute(strToSearch)
+If (regExp_Matches.Count = 1) Then
+    regex_tester = True
+    
+End If
+End Function
