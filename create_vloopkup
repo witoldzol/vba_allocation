@@ -1,0 +1,351 @@
+Option Explicit
+
+'variables to hold new and old file's names
+Dim oldName As String
+Dim newName As String
+'names of workbooks
+Dim oldAlo As String
+Dim newAlo As String
+'paths to workbooks
+Public newWb As Workbook
+Public oldWb As Workbook
+
+Dim LastRow As Integer
+Dim lookFor
+Dim srchRange
+Dim index As Integer
+
+'sheet for pivot table
+Dim PSheet As Worksheet
+'our data sheet
+Dim DSheet As Worksheet
+'pivot cache
+Dim PCache As PivotCache
+'data table cache
+Dim DCache As PivotCache
+'data last row
+Dim DataLastRow As Long
+'data last col
+Dim DataLastCol As Long
+'data range for pivot table
+Dim PRange As Range
+'range for rolled forward pivot table
+Dim rolledPivot As Range
+
+
+
+
+Sub AP_vlookup()
+
+    '------------------------------------------- V LOOKUP ------------------
+    '-----------------------------------------------------------------------
+    Application.DisplayAlerts = False
+    
+    
+    
+    'old allocation file path
+    oldAlo = Cells(3, 4).Value
+    
+    'new allocation file path
+    newAlo = Cells(10, 4).Value
+    
+    
+    
+    'extract file name from path using function (located below)
+    oldName = GetFilenameFromPath(oldAlo)
+    newName = GetFilenameFromPath(newAlo)
+    
+    'Open both allocations
+    Workbooks.Open Filename:=oldAlo
+    Workbooks.Open Filename:=newAlo
+   
+    'change it / this is temporary !! /
+    Set oldWb = Workbooks(oldName)
+    Set newWb = Workbooks(newName)
+    
+    'loop
+    
+    
+    'first row
+    Const FirstRow = 2
+    
+    'last row's cell and it's index (.row)
+    LastRow = newWb.Sheets("Allocation").Cells(2, 4).End(xlDown).Row
+    
+    'LOOP from first to last row
+    For index = FirstRow To LastRow
+        
+        Set lookFor = newWb.Sheets("Allocation").Cells(index, 4)   ' value to find (new file)
+        Set srchRange = oldWb.Sheets("Allocation").Range("D:H")    'source (old file)
+    
+        newWb.Sheets("Allocation").Cells(index, 8) = Application.vlookup(lookFor, srchRange, 5, 0)
+        
+    Next index
+    
+    'close old sheet after finishing vlookup
+    oldWb.Close
+    
+    Call pivot
+    
+Application.DisplayAlerts = True
+End Sub
+
+Sub pivot()
+
+    Application.DisplayAlerts = False
+    
+    
+    'filter out n/a and empty cells in column H
+    With ActiveSheet
+
+            .AutoFilterMode = False
+
+            .Range("A1:H1").AutoFilter
+            'select non NA and non blank items
+            .Range("A1:H1").AutoFilter Field:=8, Criteria1:="<>#N/A", Criteria2:="<>"
+            'select all cells that are visible
+            .Range("A:J").CurrentRegion.SpecialCells(xlCellTypeVisible).Select
+            
+    End With
+    'create object refering to FILTERED rows
+    Set PRange = ActiveSheet.Range("A:J").CurrentRegion.SpecialCells(xlCellTypeVisible)
+    
+    PRange.Copy
+    'add a sheet to the end
+    ActiveWorkbook.Sheets.Add After:=Sheets(Sheets.Count)
+    'name it temporary file (we will use it to create pivot table, and then delete it)
+    ActiveSheet.name = "Temp"
+    'by default cell 1,1 is active, so we can go ahead and paste in our cells
+    ActiveCell.PasteSpecial
+    're assign variable
+    Set PRange = ActiveSheet.Range("A1").CurrentRegion
+    'turn off autofilter
+    Sheets("Allocation").AutoFilterMode = False
+    
+    '------------------------ Create PIVOT TABLE -----------
+    
+    'first, create new worksheet for pivot table
+    On Error Resume Next
+    
+    Worksheets("Pivot").Delete
+    Sheets.Add Before:=Sheets("Allocation")
+    
+    'name and color code pivot tables
+    With ActiveSheet
+        .name = "Pivot"
+        .Cells(5, 2).Value = "ROLLED FORWARD"
+        .Range(Cells(5, 2), Cells(5, 6)).Select
+        
+    End With
+    
+    Call Cell_Colour
+    
+    With ActiveSheet
+        .Cells(5, 11).Value = "ROLLED FORWARD by OU"
+        .Range("K5", Range("O5")).Select
+        
+    End With
+    
+    Call Cell_Colour
+    
+    Set PSheet = Worksheets("Pivot")
+    Set DSheet = Worksheets("Allocation")
+    
+    
+    'before creating pivot table, we have to create pivot cache, and we create pivot in the same line
+    Set PCache = ActiveWorkbook.PivotCaches.Create _
+    (SourceType:=xlDatabase, SourceData:=PRange). _
+    CreatePivotTable(TableDestination:=PSheet.Cells(6, 2), _
+    TableName:="Rolled_Forward_Allocation")
+    
+    'insert ROW
+    With ActiveSheet.PivotTables("Rolled_Forward_Allocation").PivotFields("AGE")
+    .Orientation = xlRowField
+    .Position = 1
+    End With
+    
+    'insert COLUMN
+    With ActiveSheet.PivotTables("Rolled_Forward_Allocation").PivotFields("NAME")
+    .Orientation = xlColumnField
+    .Position = 1
+    End With
+    
+    'insesrt DATA
+    With ActiveSheet.PivotTables("Rolled_Forward_Allocation").PivotFields("WCI Document ID")
+    .Orientation = xlDataField
+    .Position = 1
+    .Function = xlCount
+    '.NumberFormat = "#,##0"
+    .name = "Invoices"
+    End With
+    
+    
+    'pivot with ou breakdown
+    Set PCache = ActiveWorkbook.PivotCaches.Create _
+    (SourceType:=xlDatabase, SourceData:=PRange). _
+    CreatePivotTable(TableDestination:=PSheet.Cells(6, 11), _
+    TableName:="Rolled_Forward_Allocation_ou")
+    
+    'insert ROW
+    With ActiveSheet.PivotTables("Rolled_Forward_Allocation_ou").PivotFields("OPERATING_UNIT")
+    .Orientation = xlRowField
+    .Position = 1
+    End With
+    
+    'insert COLUMN
+    With ActiveSheet.PivotTables("Rolled_Forward_Allocation_ou").PivotFields("NAME")
+    .Orientation = xlColumnField
+    .Position = 1
+    End With
+    
+    'insesrt DATA
+    With ActiveSheet.PivotTables("Rolled_Forward_Allocation_ou").PivotFields("WCI Document ID")
+    .Orientation = xlDataField
+    .Position = 1
+    .Function = xlCount
+    '.NumberFormat = "#,##0"
+    .name = "Invoices"
+    End With
+    Sheets("Temp").Delete
+    
+    
+    
+    Application.DisplayAlerts = True
+    
+    
+
+End Sub
+'create email and paste pivot into email;s body
+Sub rolledEmail()
+     
+    Dim Source As Range
+    Dim Dest As Workbook
+    Dim wb As Workbook
+    Dim TempFilePath As String
+    Dim TempFileName As String
+    Dim FileExtStr As String
+    Dim FileFormatNum As Long
+    Dim OutApp As Object
+    Dim OutMail As Object
+
+    Set Source = Sheets("Pivot").Range("A1:M20")
+    On Error Resume Next
+    
+    On Error GoTo 0
+    
+    If Source Is Nothing Then
+        MsgBox "The source is not a range or the sheet is protected, please correct and try again.", vbOKOnly
+        Exit Sub
+    End If
+
+
+    With Application
+        .ScreenUpdating = False
+        .EnableEvents = False
+    End With
+
+    Set wb = ActiveWorkbook
+    Set Dest = Workbooks.Add(xlWBATWorksheet)
+
+    Source.Copy
+    
+    Set OutApp = CreateObject("Outlook.Application")
+    Set OutMail = OutApp.CreateItem(0)
+
+    With Dest
+        On Error Resume Next
+        With OutMail
+            .To = ""
+            .CC = ""
+            .BCC = ""
+            .Subject = "Rolled Forward"
+            .HTMLBody = RangetoHTML(Source)
+            'You can add other files also like this
+            '.Attachments.Add ("C:\test.txt")
+            .Display
+        End With
+        On Error GoTo 0
+        .Close savechanges:=False
+    End With
+
+    Set OutMail = Nothing
+    Set OutApp = Nothing
+
+    With Application
+        .ScreenUpdating = True
+        .EnableEvents = True
+    End With
+End Sub
+
+'FUNCTION TO EXTRACT FILE NAME FROM PATH
+Function GetFilenameFromPath(ByVal strPath As String) As String
+' Returns the rightmost characters of a string upto but not including the rightmost '\'
+' e.g. 'c:\winnt\win.ini' returns 'win.ini'
+
+    If Right$(strPath, 1) <> "\" And Len(strPath) > 0 Then
+        GetFilenameFromPath = GetFilenameFromPath(Left$(strPath, Len(strPath) - 1)) + Right$(strPath, 1)
+    End If
+End Function
+
+'this function allows us to transform range from excel to html and use it in email's body
+
+Function RangetoHTML(Rng As Range)
+' Works in Excel 2000, Excel 2002, Excel 2003, Excel 2007, Excel 2010, Outlook 2000, Outlook 2002, Outlook 2003, Outlook 2007, and Outlook 2010.
+    Dim fso As Object
+    Dim ts As Object
+    Dim TempFile As String
+    Dim TempWB As Workbook
+
+    TempFile = Environ$("temp") & "/" & Format(Now, "dd-mm-yy h-mm-ss") & ".htm"
+ 
+    ' Copy the range and create a workbook to receive the data.
+    Rng.Copy
+    Set TempWB = Workbooks.Add(1)
+    With TempWB.Sheets(1)
+        .Cells(1).PasteSpecial
+        .Cells(1).Select
+        Application.CutCopyMode = False
+        On Error Resume Next
+        .DrawingObjects.Visible = True
+        .DrawingObjects.Delete
+        On Error GoTo 0
+    End With
+ 
+    ' Publish the sheet to an .htm file.
+    With TempWB.PublishObjects.Add( _
+         SourceType:=xlSourceRange, _
+         Filename:=TempFile, _
+         Sheet:=TempWB.Sheets(1).name, _
+         Source:=TempWB.Sheets(1).UsedRange.Address, _
+         HtmlType:=xlHtmlStatic)
+        .Publish (True)
+    End With
+ 
+    ' Read all data from the .htm file into the RangetoHTML subroutine.
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set ts = fso.GetFile(TempFile).OpenAsTextStream(1, -2)
+    RangetoHTML = ts.ReadAll
+    ts.Close
+    RangetoHTML = Replace(RangetoHTML, "align=center x:publishsource=", _
+                          "align=left x:publishsource=")
+ 
+    ' Close TempWB.
+    TempWB.Close savechanges:=False
+ 
+    ' Delete the htm file.
+    Kill TempFile
+ 
+    Set ts = Nothing
+    Set fso = Nothing
+    Set TempWB = Nothing
+End Function
+
+
+'--------------------------------------- template for selecting range dynamically -----------
+'lets define data range using last row & col
+'DataLastRow = DSheet.Cells(Rows.Count, 1).End(xlUp).Row.SpecialCells(xlCellTypeVisible)  'get last row
+'DataLastCol = DSheet.Cells(1, Columns.Count).End(xlToLeft).Column.SpecialCells(xlCellTypeVisible)  'get last col
+'creates / resizes pivot range (so we don't have to adjust every time)
+
+
+
